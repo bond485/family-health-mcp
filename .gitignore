@@ -13,6 +13,7 @@ build/
 # Each fork has its own KV namespace ids — keep local wrangler.toml out of VCS.
 # wrangler.toml.example is the committed template.
 wrangler.toml
+wrangler.spouse.toml
 
 # Environment
 .env

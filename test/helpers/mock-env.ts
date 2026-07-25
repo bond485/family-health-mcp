@@ -24,6 +24,7 @@ export function createMockEnv(tokens: Record<string, string> = {}, overrides: Pa
   return {
     TOKENS: createMockKv(tokens) as unknown as KVNamespace,
     CACHE: createMockKv() as unknown as KVNamespace,
+    HEALTH_DB: undefined,
     FITBIT_CLIENT_ID: 'test-client-id',
     FITBIT_CLIENT_SECRET: 'test-client-secret',
     GOOGLE_CLIENT_ID: 'test-google-client-id',

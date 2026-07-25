@@ -1,106 +1,281 @@
-# google-health-worker-mcp
+# Family Health MCP
 
-Personal remote MCP server on Cloudflare Workers that connects Claude (iPhone / desktop / web via Custom Connector) to **Google Health API v4** — read activity, sleep, heart rate, SpO₂, HRV, respiratory rate, skin temperature, weight and nutrition.
+Private family health monitoring on Cloudflare Workers. The project connects Claude custom
+connectors and cloud Routines to **Google Health API v4**, adds fixed-recipient Telegram summaries,
+and optionally stores menstrual-cycle observations in Cloudflare D1.
 
-> All 16 `HealthProvider` read methods run on Google Health v4 (`GoogleHealthProvider`). This edition exposes the read surface; the write/delete methods are present in the interface but not implemented.
+The Google Health integration is read-only. It covers activity, sleep, heart rate, SpO2, HRV,
+respiratory rate, skin-temperature variation, weight, body fat and nutrition. Telegram and cycle
+tools write only to the resources configured by the server owner.
 
-Based on [tachibanayu24/fitbit-googlehealth-mcp](https://github.com/tachibanayu24/fitbit-googlehealth-mcp) (MIT). Upstream docs preserved under `docs/upstream-*`.
+Based on [tachibanayu24/fitbit-googlehealth-mcp](https://github.com/tachibanayu24/fitbit-googlehealth-mcp)
+(MIT). Upstream documents are preserved under `docs/upstream-*`.
 
-## Why
+## What This Builds
 
-The legacy Fitbit Web API shuts down in **September 2026**. Google Health API v4 is its successor. This project keeps the upstream's Workers / Hono / MCP architecture — the only form factor usable from the Claude mobile app — and swaps the data source to v4.
+```text
+Google Health profile A ─→ Worker A ─┐
+                                     ├─→ Claude conversation / daily Routine
+Google Health profile B ─→ Worker B ─┘                 │
+                                                       └─→ fixed Telegram recipients
 
-## Capabilities
+Spouse Health Worker ─→ D1 cycle observations (optional)
+```
 
-| Domain | Methods | Status |
+- Each Google Health profile has its own OAuth tokens, cache and Worker URL.
+- Claude can query either profile without combining the underlying records.
+- A single Routine can read both connectors and send one combined daily report.
+- Telegram recipients are fixed in Worker secrets; the model cannot choose another `chat_id`.
+- Menstrual-cycle observations are stored only in the spouse D1 database and are not written back
+  to Google Health.
+
+## Tools
+
+### Google Health reads
+
+| Domain | Methods |
+|---|---|
+| Profile and devices | `getProfile`, `listDevices` |
+| Activity | steps, distance, calories, floors and daily summaries |
+| Exercise | recent exercise sessions |
+| Sleep | one-day and range sleep logs |
+| Heart | resting and intraday heart rate |
+| Vitals | HRV, SpO2, respiratory rate, skin-temperature variation and VO2 max |
+| Body and nutrition | weight, body fat and food logs |
+
+These are exposed as 16 read-only MCP tools.
+
+### Family additions
+
+| MCP tool | Availability | Purpose |
 |---|---|---|
-| Profile · devices | `getProfile`, `listDevices` | ✅ live |
-| Activity | `getActivityTimeSeries` (steps/distance/calories/floors), `getDailySummary` | ✅ live |
-| Exercise | `getExerciseList` | ✅ live (mapping unverified — no exercise data on account) |
-| Sleep | `getSleep`, `getSleepRange` (stage mapping) | ✅ live |
-| Heart | `getHeartRateRange` (resting), `getHeartRateIntraday` (downsampled) | ✅ live |
-| Metrics | `getHRV`, `getSpO2`, `getRespiratoryRate`, `getSkinTemperature`, `getCardioFitness` | ✅ live |
-| Body · food | `getBodyLog` (weight), `getFoodLog` (nutrition) | ✅ live |
+| `send_telegram_alert` | Every configured Worker | Sends one summary to fixed private recipients |
+| `save_cycle_observation` | Worker with `HEALTH_DB` only | Records or corrects a cycle date or symptom entry |
+| `get_cycle_history` | Worker with `HEALTH_DB` only | Reads cycle starts, symptoms and cycle-length context |
 
-The `HealthProvider` interface also declares write/delete methods (`logFood`, `logWeight`, …); in this edition they throw "not implemented".
+`save_cycle_observation` records a period start, its total duration, optional flow, symptoms and a
+short private note. It must only be called after an explicit user request. A scheduled Routine
+should read cycle history but must never create or modify observations.
 
-Skin temperature is confirmed **absolute °C + baseline**; the mapper reports the nightly-relative delta. Reconcile calls omit `filter` (v4 filter members are type-specific and mostly 400); range narrowing is done client-side on the civil date.
+## Important Cycle Health Limitation
 
-## Setup
+The Google Health mobile app includes **Cycle health**, but the current
+[Google Health API v4 data type list](https://developers.google.com/health/data-types) does not
+expose menstruation or cycle records. This project therefore cannot automatically import dates
+entered in the Google Health app.
 
-One-time bootstrap.
+The optional D1 tools provide a private replacement:
 
-**Google Cloud (console):**
-
-1. Create a project → APIs & Services → enable **Health API**.
-2. OAuth consent screen (User type **External**): add the read scopes below, add your own Gmail as a **test user**, then **Publish the app to "In production"**. (Testing-mode refresh tokens expire after 7 days, which breaks an unattended Worker.)
-3. Credentials → create an OAuth client (**Web application**), Authorized redirect URI `http://127.0.0.1:8787/oauth/callback`. Note the client id / secret.
-
-Read scopes (prefix `https://www.googleapis.com/auth/`):
-
-```
-googlehealth.profile.readonly
-googlehealth.settings.readonly
-googlehealth.activity_and_fitness.readonly
-googlehealth.health_metrics_and_measurements.readonly
-googlehealth.sleep.readonly
-googlehealth.nutrition.readonly
+```text
+User tells Claude: "Record today as the first day of my period.
+It lasted 6 days, with cramps and fatigue at severity 2."
+                  ↓
+Spouse Health MCP saves the observation to D1
+                  ↓
+The daily Routine compares cycle history with sleep temperature,
+resting heart rate, HRV, sleep and symptoms
 ```
 
-> Do **not** add `include_granted_scopes` to the authorization URL — mixing legacy scopes can cause `403`s on reads. Use `access_type=offline&prompt=consent` to get a refresh token.
+The cycle estimate is informational. It is not suitable for contraception, fertility decisions or
+medical diagnosis.
 
-**This repo:**
+## Prerequisites
+
+- Node.js 20 or newer and pnpm
+- A Cloudflare account with Workers, KV and optional D1
+- A Google Cloud project with Google Health API enabled
+- A Claude account that supports custom connectors and cloud Routines
+- A Telegram Bot token and the private `chat_id` for each recipient
+
+## 1. Google Cloud OAuth
+
+1. Create a Google Cloud project and enable **Google Health API**.
+2. Configure an External OAuth application.
+3. Add these read-only scopes:
+
+```text
+https://www.googleapis.com/auth/googlehealth.profile.readonly
+https://www.googleapis.com/auth/googlehealth.settings.readonly
+https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly
+https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly
+https://www.googleapis.com/auth/googlehealth.sleep.readonly
+https://www.googleapis.com/auth/googlehealth.nutrition.readonly
+```
+
+4. Create a Web application OAuth client with this redirect URI:
+
+```text
+http://127.0.0.1:8787/oauth/callback
+```
+
+Google Health scopes are restricted. Testing-mode refresh tokens can expire after seven days, and
+Google may block unverified access for users who are not associated with the project. Public or
+multi-user deployments may require OAuth verification. Never publish the OAuth client secret.
+
+## 2. Deploy the First Profile
 
 ```bash
-pnpm install                      # you run this — deps are never auto-installed
-
+pnpm install
 cp wrangler.toml.example wrangler.toml
-pnpm wrangler kv namespace create TOKENS   # paste ids into wrangler.toml
+
+pnpm wrangler kv namespace create TOKENS
 pnpm wrangler kv namespace create CACHE
-
-export GOOGLE_CLIENT_ID=...        # the Web OAuth client from above
-export GOOGLE_CLIENT_SECRET=...
-pnpm run setup:google             # browser consent -> prints wrangler secret/kv commands
-
-pnpm deploy                       # then add the Custom Connector in claude.ai:
-                                  #   https://<worker>.workers.dev/mcp/<MCP_SHARED_SECRET>
 ```
 
-`MCP_SHARED_SECRET` must be **hex** (`openssl rand -hex 32`) — it is embedded in the URL path, so base64's `/` would break routing. Secrets live in Cloudflare, tokens in KV — never in this repo.
+Paste the returned namespace IDs into the untracked `wrangler.toml`.
 
-## Architecture
+Load the OAuth client into the current terminal and run the local authorization bootstrap:
 
-```
-Claude (mobile / desktop / web)
-  │ Streamable HTTP  /mcp/<SECRET>
-  ▼
-Cloudflare Workers
-  ├─ guard (shared secret + Anthropic CIDR allowlist)
-  ├─ @hono/mcp (Streamable HTTP transport)
-  └─ McpServer → tools/* → HealthProvider
-                              └─ GoogleHealthProvider → health.googleapis.com/v4
-  KV: TOKENS (Google OAuth refresh/access) · CACHE (read cache)
+```bash
+export GOOGLE_CLIENT_ID='...'
+export GOOGLE_CLIENT_SECRET='...'
+pnpm run setup:google
 ```
 
-Two auth layers: **① Claude → Worker** = shared secret in the URL path + Anthropic CIDR allowlist; **② Worker → Google** = KV refresh token, auto-refreshed. The tools layer is provider-agnostic (`HealthProvider`); swapping Fitbit → Google was one line in `src/server.ts`.
+Store the resulting OAuth tokens in the `TOKENS` KV binding using the commands printed by the
+script. Add Worker secrets:
+
+```bash
+pnpm wrangler secret put GOOGLE_CLIENT_ID
+pnpm wrangler secret put GOOGLE_CLIENT_SECRET
+pnpm wrangler secret put MCP_SHARED_SECRET
+pnpm wrangler secret put TELEGRAM_BOT_TOKEN
+pnpm wrangler secret put TELEGRAM_CHAT_ID
+```
+
+Generate `MCP_SHARED_SECRET` with `openssl rand -hex 32`. It is embedded in the MCP URL path and must
+never be committed or shown in screenshots.
+
+For multiple fixed Telegram recipients, add this optional secret:
+
+```bash
+pnpm wrangler secret put TELEGRAM_CHAT_IDS
+```
+
+Its value is a comma-separated list such as `123456789,987654321`. When present, it supersedes
+`TELEGRAM_CHAT_ID`.
+
+Deploy:
+
+```bash
+pnpm wrangler deploy
+```
+
+Add a Claude custom connector using:
+
+```text
+https://<worker>.workers.dev/mcp/<MCP_SHARED_SECRET>
+```
+
+## 3. Deploy a Second Family Profile
+
+Each person must use a separate Google account and separate Worker token storage.
+
+```bash
+cp wrangler.spouse.toml.example wrangler.spouse.toml
+
+pnpm wrangler kv namespace create SPOUSE_TOKENS
+pnpm wrangler kv namespace create SPOUSE_CACHE
+```
+
+Paste the returned IDs into `wrangler.spouse.toml`. Repeat Google OAuth while signed in to the
+second person's account, then store tokens with `--config wrangler.spouse.toml`.
+
+Set a separate MCP secret and the required Google and Telegram secrets:
+
+```bash
+pnpm wrangler secret put GOOGLE_CLIENT_ID --config wrangler.spouse.toml
+pnpm wrangler secret put GOOGLE_CLIENT_SECRET --config wrangler.spouse.toml
+pnpm wrangler secret put MCP_SHARED_SECRET --config wrangler.spouse.toml
+pnpm wrangler secret put TELEGRAM_BOT_TOKEN --config wrangler.spouse.toml
+pnpm wrangler secret put TELEGRAM_CHAT_ID --config wrangler.spouse.toml
+pnpm wrangler secret put TELEGRAM_CHAT_IDS --config wrangler.spouse.toml
+```
+
+Deploy and add the second Worker URL as a separate Claude connector:
+
+```bash
+pnpm wrangler deploy --config wrangler.spouse.toml
+```
+
+## 4. Enable Private Cycle and Symptom Records
+
+Create one D1 database for the spouse profile:
+
+```bash
+pnpm wrangler d1 create family-health-spouse --location=enam
+```
+
+Paste the returned database ID into `wrangler.spouse.toml`, then apply the tracked migration:
+
+```bash
+pnpm wrangler d1 migrations apply family-health-spouse \
+  --remote --config wrangler.spouse.toml
+```
+
+Redeploy the spouse Worker:
+
+```bash
+pnpm wrangler deploy --config wrangler.spouse.toml
+```
+
+After reconnecting the Claude connector, only the spouse connector will expose
+`save_cycle_observation` and `get_cycle_history`.
+
+Useful natural-language recording examples:
+
+```text
+Use Spouse Health to record 2026-07-25 as the first day of my period,
+lasting 6 days, with cramps and fatigue at severity 2.
+```
+
+```text
+Use Spouse Health to add bloating and headache with mild severity for 2026-07-23.
+```
+
+Backfill at least three historical period-start dates before expecting a basic cycle-length
+estimate. Six or more cycles are better when cycle length varies.
+
+## 5. Daily Claude Routine
+
+Create one cloud Routine with both profile connectors and a daily schedule. A complete Chinese
+prompt is provided in
+[docs/family-routine-prompt-zh.md](./docs/family-routine-prompt-zh.md).
+
+The supplied prompt:
+
+- always sends a daily report, even when there is no alert;
+- keeps the two profiles separate;
+- compares each person with their own baseline;
+- gives conservative activity recommendations;
+- reads cycle history without modifying it;
+- sends only one combined Telegram message to avoid duplicates.
+
+Cloud Routines may use connector write tools without interactive approval. Review the attached
+connectors and prompt carefully before enabling unattended execution.
+
+## Security and Privacy
+
+- Never commit `wrangler.toml`, `wrangler.spouse.toml`, OAuth tokens, bot tokens or MCP URLs.
+- Telegram bot chats are cloud chats, not end-to-end encrypted Secret Chats. Send summaries rather
+  than raw minute-level records.
+- Only share another person's health or cycle summary after explicit consent.
+- Treat the D1 cycle database as sensitive health information.
+- Rotate an MCP secret immediately if its complete URL is exposed.
+- Google Health remains read-only; cycle observations live only in the private D1 database.
 
 ## Development
 
 ```bash
-pnpm typecheck     # tsc --noEmit
-pnpm test          # vitest (113 tests)
-pnpm lint          # biome
-pnpm deploy        # wrangler deploy
+pnpm typecheck
+pnpm test
+pnpm lint
+pnpm wrangler deploy --dry-run
 ```
 
-Provider field mappings are covered by fixture tests using shapes probed from the live v4 API. Deployment: connect the repo in **Cloudflare Workers Builds** (dashboard → Workers → Builds → connect GitHub) so `push main` runs install + test + `wrangler deploy` automatically.
-
-## Documents
-
-| Doc | What |
-|---|---|
-| `docs/upstream-*.md` | Upstream README / research / journal (Fitbit-era reference) |
+Migrations are tracked under `migrations/`. Apply them explicitly before deploying code that uses a
+new schema.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE) (upstream copyright preserved).
+MIT. See [LICENSE](./LICENSE). Upstream copyright is preserved.

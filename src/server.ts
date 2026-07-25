@@ -6,7 +6,7 @@ import { registerAllTools } from './tools';
 export function buildServer(env: Env): McpServer {
   const server = new McpServer({
     name: 'fitbit-googlehealth-mcp',
-    version: '0.3.0',
+    version: '0.4.0',
   });
   const provider = new GoogleHealthProvider(env);
   registerAllTools(server, provider, env);

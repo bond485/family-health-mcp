@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Env } from '../env';
 import type { HealthProvider } from '../providers/types';
+import { registerCycleTools } from './cycle';
 import { registerTelegramAlertTool } from './notify/telegram';
 import { registerActivityReadTools } from './read/activity';
 import { registerBodyReadTools } from './read/body';
@@ -20,5 +21,6 @@ export function registerAllTools(server: McpServer, provider: HealthProvider, en
   registerBodyReadTools(server, provider, env);
   registerNutritionReadTools(server, provider, env);
   registerMetricsReadTools(server, provider, env);
+  registerCycleTools(server, env);
   registerTelegramAlertTool(server, env);
 }

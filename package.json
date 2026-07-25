@@ -1,14 +1,14 @@
 {
   "name": "google-health-worker-mcp-v1",
-  "version": "0.1.0",
-  "description": "Remote MCP server on Cloudflare Workers connecting Claude to the Google Health API v4: comprehensive health-data reads and photo-driven food logging for Claude mobile.",
+  "version": "0.4.0",
+  "description": "Private family health MCP on Cloudflare Workers with Google Health reads, Telegram summaries and optional cycle observations.",
   "private": true,
   "type": "module",
   "license": "MIT",
   "author": "Yuto Tachibana",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Ring8688/google-health-worker-mcp-V1.git"
+    "url": "https://github.com/bond485/family-health-mcp.git"
   },
   "scripts": {
     "dev": "wrangler dev",

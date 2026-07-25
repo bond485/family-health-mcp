@@ -1,6 +1,7 @@
 export type Env = {
   TOKENS: KVNamespace;
   CACHE: KVNamespace;
+  HEALTH_DB?: D1Database;
   // Fitbit creds retained while the legacy provider still compiles.
   FITBIT_CLIENT_ID: string;
   FITBIT_CLIENT_SECRET: string;

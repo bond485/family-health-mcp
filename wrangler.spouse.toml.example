@@ -1,0 +1,25 @@
+name = "family-health-spouse-mcp"
+main = "src/index.ts"
+compatibility_date = "2025-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ALLOWED_CIDRS = "160.79.104.0/21"
+
+[[kv_namespaces]]
+binding = "TOKENS"
+id = "<spouse-tokens-namespace-id>"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "<spouse-cache-namespace-id>"
+
+[[d1_databases]]
+binding = "HEALTH_DB"
+database_name = "family-health-spouse"
+database_id = "<spouse-d1-database-id>"
+migrations_dir = "migrations"
+
+# Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, MCP_SHARED_SECRET,
+# TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID and optional TELEGRAM_CHAT_IDS
+# with `wrangler secret put --config wrangler.spouse.toml`.
