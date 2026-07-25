@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Env } from '../../env';
 import { toolErrorResult } from '../../lib/errors';
-import { sendTelegramMessage } from '../../lib/telegram';
+import { resolveTelegramChatIds, sendTelegramBroadcast } from '../../lib/telegram';
 
 export function registerTelegramAlertTool(server: McpServer, env: Env): void {
   server.registerTool(
@@ -10,7 +10,7 @@ export function registerTelegramAlertTool(server: McpServer, env: Env): void {
     {
       title: 'Send Telegram health alert',
       description:
-        'Sends a health alert or setup test to the single Telegram chat configured by the server owner. The recipient cannot be changed by the caller.',
+        'Sends a health alert, daily summary, or setup test to the fixed family Telegram chats configured by the server owner. Recipients cannot be changed by the caller.',
       inputSchema: {
         message: z
           .string()
@@ -23,7 +23,8 @@ export function registerTelegramAlertTool(server: McpServer, env: Env): void {
       },
       outputSchema: {
         sent: z.boolean(),
-        messageId: z.number().int(),
+        recipientCount: z.number().int(),
+        messageIds: z.array(z.number().int()),
       },
       annotations: {
         readOnlyHint: false,
@@ -34,15 +35,21 @@ export function registerTelegramAlertTool(server: McpServer, env: Env): void {
     },
     async ({ message }) => {
       try {
-        const result = await sendTelegramMessage(
-          env.TELEGRAM_BOT_TOKEN,
-          env.TELEGRAM_CHAT_ID,
-          message,
-        );
-        const data = { sent: true, messageId: result.messageId };
+        const chatIds = resolveTelegramChatIds(env.TELEGRAM_CHAT_IDS, env.TELEGRAM_CHAT_ID);
+        const result = await sendTelegramBroadcast(env.TELEGRAM_BOT_TOKEN, chatIds, message);
+        const data = {
+          sent: true,
+          recipientCount: result.messageIds.length,
+          messageIds: result.messageIds,
+        };
         return {
           structuredContent: data,
-          content: [{ type: 'text', text: `Telegram alert sent (message ${result.messageId}).` }],
+          content: [
+            {
+              type: 'text',
+              text: `Telegram alert sent to ${result.messageIds.length} configured recipient(s).`,
+            },
+          ],
         };
       } catch (err) {
         return toolErrorResult(err);

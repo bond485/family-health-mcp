@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { sendTelegramMessage } from '../../src/lib/telegram';
+import {
+  resolveTelegramChatIds,
+  sendTelegramBroadcast,
+  sendTelegramMessage,
+} from '../../src/lib/telegram';
 
 describe('sendTelegramMessage', () => {
   it('sends plain text to the configured Telegram chat', async () => {
@@ -56,5 +60,45 @@ describe('sendTelegramMessage', () => {
       sendTelegramMessage('test-token', '123456789', 'x'.repeat(4097), fetchMock as typeof fetch),
     ).rejects.toThrow('Telegram message exceeds the 4096-character limit');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveTelegramChatIds', () => {
+  it('uses, trims, and deduplicates the configured family recipients', () => {
+    expect(resolveTelegramChatIds('123, 456,123', '999')).toEqual(['123', '456']);
+  });
+
+  it('falls back to the original single recipient', () => {
+    expect(resolveTelegramChatIds(undefined, '123')).toEqual(['123']);
+  });
+
+  it('rejects invalid recipient configuration', () => {
+    expect(() => resolveTelegramChatIds('123,not-a-chat', '999')).toThrow(
+      'Telegram recipient configuration is invalid',
+    );
+  });
+});
+
+describe('sendTelegramBroadcast', () => {
+  it('sends the same message to every configured recipient', async () => {
+    const recipients: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      recipients.push(body.chat_id);
+      return new Response(JSON.stringify({ ok: true, result: { message_id: recipients.length } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    await expect(
+      sendTelegramBroadcast(
+        'test-token',
+        ['123', '456'],
+        'Family health summary',
+        fetchMock as typeof fetch,
+      ),
+    ).resolves.toEqual({ messageIds: [1, 2] });
+    expect(recipients).toEqual(['123', '456']);
   });
 });

@@ -31,6 +31,7 @@ export function createMockEnv(tokens: Record<string, string> = {}, overrides: Pa
     MCP_SHARED_SECRET: 'test-shared-secret',
     TELEGRAM_BOT_TOKEN: 'test-telegram-bot-token',
     TELEGRAM_CHAT_ID: '123456789',
+    TELEGRAM_CHAT_IDS: undefined,
     ALLOWED_CIDRS: '160.79.104.0/21',
     ...overrides,
   } as Env;

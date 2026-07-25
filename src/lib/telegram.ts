@@ -2,12 +2,40 @@ export type TelegramSendResult = {
   messageId: number;
 };
 
+export type TelegramBroadcastResult = {
+  messageIds: number[];
+};
+
 type TelegramResponse = {
   ok?: boolean;
   result?: {
     message_id?: number;
   };
 };
+
+export function resolveTelegramChatIds(
+  configuredChatIds: string | undefined,
+  fallbackChatId: string,
+): string[] {
+  const source = configuredChatIds?.trim() || fallbackChatId.trim();
+  const chatIds = [
+    ...new Set(
+      source
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ];
+
+  if (chatIds.length === 0) {
+    throw new Error('Telegram notifications are not configured');
+  }
+  if (chatIds.some((chatId) => !/^-?\d+$/.test(chatId))) {
+    throw new Error('Telegram recipient configuration is invalid');
+  }
+
+  return chatIds;
+}
 
 export async function sendTelegramMessage(
   botToken: string,
@@ -53,4 +81,16 @@ export async function sendTelegramMessage(
   }
 
   return { messageId: messageId as number };
+}
+
+export async function sendTelegramBroadcast(
+  botToken: string,
+  chatIds: string[],
+  message: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<TelegramBroadcastResult> {
+  const results = await Promise.all(
+    chatIds.map((chatId) => sendTelegramMessage(botToken, chatId, message, fetchImpl)),
+  );
+  return { messageIds: results.map((result) => result.messageId) };
 }
